@@ -140,8 +140,14 @@ test('it ignores specific files', async () => {
   const fs = createFs(
     [
       { method: 'stat', path: '', isDir: true },
-      { method: 'readdir', path: '', contents: ['test.json', 'test2.json'] },
+      {
+        method: 'readdir',
+        path: '',
+        contents: ['test.json', 'test2.json', 'deep'],
+      },
       { method: 'stat', path: 'test.json', isDir: false },
+      { method: 'stat', path: 'test2.json', isDir: false },
+      { method: 'stat', path: 'deep', isDir: true },
       { method: 'readFile', path: 'test.json', contents: '{"hi":"ho"}' },
       { method: 'mkdir', path: 'dist' },
       {
@@ -153,10 +159,28 @@ test('it ignores specific files', async () => {
     __dirname,
   );
 
+  let i = 0;
   assert.deepEqual(
     await cmpl({
       entry: __dirname,
-      include: (name) => name !== 'test2.json',
+      recursive: false,
+      include: (name, isDir) => {
+        switch (i++) {
+          case 0:
+            assert.equal(name, 'test.json');
+            assert.equal(isDir, false);
+            break;
+          case 1:
+            assert.equal(name, 'test2.json');
+            assert.equal(isDir, false);
+            break;
+          case 0:
+            assert.equal(name, 'deep');
+            assert.equal(isDir, true);
+            break;
+        }
+        return name === 'test.json';
+      },
       outDir: join(__dirname, 'dist'),
       fs,
     }),

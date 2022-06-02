@@ -33,7 +33,7 @@ export interface CmplOptions {
   outDir: string;
   recursive?: boolean;
   rename?: FileNamerFn;
-  include?: (name: string) => boolean;
+  include?: (name: string, isDir: boolean) => boolean;
   transform?: TransformFn;
   path?: Path | Promise<Path>;
   fs?: Fs | Promise<Fs>;
@@ -111,18 +111,19 @@ export async function cmpl({
     await Promise.all(
       (
         await readdir(dir)
-      )
-        .filter((f) => include(relative(entry, join(dir, f))))
-        .map(async (f) => {
-          if ((await stat(join(dir, f))).isDirectory()) {
-            if (recursive) {
-              return read(join(dir, f));
-            } else {
-              return;
-            }
+      ).map(async (f) => {
+        if ((await stat(join(dir, f))).isDirectory()) {
+          if (recursive && include(relative(entry, join(dir, f)), true)) {
+            return read(join(dir, f));
+          } else {
+            return;
           }
+        }
+
+        if (include(relative(entry, join(dir, f)), false)) {
           Object.assign(manifest, await prcss(join(dir, f), processOpts));
-        }),
+        }
+      }),
     );
   };
 
@@ -191,7 +192,7 @@ export async function* wtch({
   })) {
     switch (event.eventType) {
       case 'change':
-        if (include(event.filename)) {
+        if (include(event.filename, true)) {
           Object.assign(
             manifest,
             await prcss(join(baseDir, event.filename), prcssOpts),
@@ -203,7 +204,7 @@ export async function* wtch({
         if (manifest[event.filename]) {
           delete manifest[event.filename];
           yield Object.assign({}, manifest);
-        } else if (include(event.filename)) {
+        } else if (include(event.filename, true)) {
           Object.assign(
             manifest,
             await prcss(join(baseDir, event.filename), prcssOpts),
