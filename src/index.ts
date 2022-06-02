@@ -194,7 +194,7 @@ export async function* wtch({
   })) {
     switch (event.eventType) {
       case 'change':
-        if (include(event.filename, true)) {
+        if (include(event.filename, false)) {
           Object.assign(
             manifest,
             await prcss(join(baseDir, event.filename), prcssOpts),
@@ -206,7 +206,7 @@ export async function* wtch({
         if (manifest[event.filename]) {
           delete manifest[event.filename];
           yield Object.assign({}, manifest);
-        } else if (include(event.filename, true)) {
+        } else if (include(event.filename, false)) {
           Object.assign(
             manifest,
             await prcss(join(baseDir, event.filename), prcssOpts),
