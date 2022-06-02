@@ -39,7 +39,7 @@ export interface CmplOptions {
   fs?: Fs | Promise<Fs>;
 }
 
-export const contentHash =
+export const cntntHsh =
   (
     length: number = 8,
     crypto: Crypto | Promise<Crypto> = import('node:crypto'),
