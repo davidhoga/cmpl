@@ -150,6 +150,7 @@ export interface WatchFs extends Fs {
 export interface WtchOpts extends Omit<CmplOptions, 'fs'> {
   signal?: AbortSignal;
   fs?: WatchFs | Promise<WatchFs>;
+  onError?: 'ignore' | 'throw' | ((err: unknown) => void);
 }
 
 export async function* wtch({
@@ -160,6 +161,9 @@ export async function* wtch({
   rename,
   transform,
   include = () => true,
+  onError = process.env.CI
+    ? 'throw'
+    : (err) => console.log(err instanceof Error ? err.message : err),
   fs = import('node:fs/promises'),
   path = import('node:path'),
 }: WtchOpts) {
@@ -175,9 +179,22 @@ export async function* wtch({
   };
   const { join, dirname } = await path;
   const { watch, stat } = await fs;
+  const handleError = (err: unknown) => {
+    if (onError === 'ignore') {
+      return;
+    } else if (onError === 'throw') {
+      throw err;
+    }
+    onError(err);
+  };
 
-  const manifest = await cmpl(cmplOpts);
-  yield Object.assign({}, manifest);
+  let manifest: Record<string, string> | null = null;
+  try {
+    manifest = await cmpl(cmplOpts);
+    yield Object.assign({}, manifest);
+  } catch (err) {
+    handleError(err);
+  }
 
   const isDir = (await stat(entry)).isDirectory();
   const baseDir = isDir ? entry : dirname(entry);
@@ -190,30 +207,39 @@ export async function* wtch({
 
   for await (const event of watch(entry, {
     recursive: isDir ? recursive : false,
-    signal: signal,
+    signal,
   })) {
-    switch (event.eventType) {
-      case 'change':
-        if (include(event.filename, false)) {
-          Object.assign(
-            manifest,
-            await prcss(join(baseDir, event.filename), prcssOpts),
-          );
-          yield Object.assign({}, manifest);
+    try {
+      if (!manifest) {
+        manifest = await cmpl(cmplOpts);
+        yield Object.assign({}, manifest);
+      } else {
+        switch (event.eventType) {
+          case 'change':
+            if (include(event.filename, false)) {
+              Object.assign(
+                manifest,
+                await prcss(join(baseDir, event.filename), prcssOpts),
+              );
+              yield Object.assign({}, manifest);
+            }
+            break;
+          case 'rename':
+            if (manifest[event.filename]) {
+              delete manifest[event.filename];
+              yield Object.assign({}, manifest);
+            } else if (include(event.filename, false)) {
+              Object.assign(
+                manifest,
+                await prcss(join(baseDir, event.filename), prcssOpts),
+              );
+              yield Object.assign({}, manifest);
+            }
+            break;
         }
-        break;
-      case 'rename':
-        if (manifest[event.filename]) {
-          delete manifest[event.filename];
-          yield Object.assign({}, manifest);
-        } else if (include(event.filename, false)) {
-          Object.assign(
-            manifest,
-            await prcss(join(baseDir, event.filename), prcssOpts),
-          );
-          yield Object.assign({}, manifest);
-        }
-        break;
+      }
+    } catch (err) {
+      handleError(err);
     }
   }
 }

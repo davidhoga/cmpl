@@ -299,8 +299,8 @@ test('it creates custom file names', async () => {
 });
 
 test('watches single file', async () => {
-  const ac = new AbortController();
-  const watcher = createWatcher(ac.signal);
+  const watchEvents: Deferred<WatchEvent>[] = [defer()];
+  const watcher = createWatcher(watchEvents.map(({ promise }) => promise));
   const fs = createFs(
     [
       { method: 'stat', path: 'test.json', isDir: false },
@@ -319,7 +319,7 @@ test('watches single file', async () => {
       {
         method: 'watch',
         path: 'test.json',
-        options: { recursive: false, signal: ac.signal },
+        options: { recursive: false, signal: undefined },
         watcher,
       },
       {
@@ -338,7 +338,6 @@ test('watches single file', async () => {
   );
 
   const wtchr = wtch({
-    signal: ac.signal,
     rename: cntntHsh(2),
     entry: join(__dirname, 'test.json'),
     outDir: join(__dirname, 'dist'),
@@ -352,13 +351,12 @@ test('watches single file', async () => {
         assert.deepEqual(manifest, {
           'test.json': 'test-DF.json',
         });
-        watcher.emit({ eventType: 'change', filename: 'test.json' });
+        watchEvents[0].resolve({ eventType: 'change', filename: 'test.json' });
         break;
       case 1:
         assert.deepEqual(manifest, {
           'test.json': 'test-9E.json',
         });
-        ac.abort();
         break;
       default:
         throw new Error('NEIN');
@@ -368,8 +366,8 @@ test('watches single file', async () => {
 });
 
 test('ignores newly added files', async () => {
-  const ac = new AbortController();
-  const watcher = createWatcher(ac.signal);
+  const watchEvents: Deferred<WatchEvent>[] = [defer()];
+  const watcher = createWatcher(watchEvents.map(({ promise }) => promise));
   const fs = createFs(
     [
       { method: 'stat', path: '', isDir: true },
@@ -390,7 +388,7 @@ test('ignores newly added files', async () => {
       {
         method: 'watch',
         path: '',
-        options: { recursive: true, signal: ac.signal },
+        options: { recursive: true, signal: undefined },
         watcher,
       },
     ],
@@ -398,7 +396,6 @@ test('ignores newly added files', async () => {
   );
 
   const wtchr = wtch({
-    signal: ac.signal,
     entry: __dirname,
     include: (name) => name === 'test.json',
     outDir: join(__dirname, 'dist'),
@@ -412,8 +409,108 @@ test('ignores newly added files', async () => {
         assert.deepEqual(manifest, {
           'test.json': 'test.json',
         });
-        watcher.emit({ eventType: 'change', filename: 'test2.json' });
-        ac.abort();
+        watchEvents[0].resolve({ eventType: 'change', filename: 'test2.json' });
+        break;
+      default:
+        throw new Error('NEIN');
+    }
+  }
+  fs.done();
+});
+
+test('continues watching despite error', async () => {
+  const watchEvents: Deferred<WatchEvent>[] = [defer(), defer(), defer()];
+  const watcher = createWatcher(watchEvents.map(({ promise }) => promise));
+  const myErr1 = new Error('Err1');
+  const myErr2 = new Error('Err2');
+  const fs = createFs(
+    [
+      { method: 'stat', path: 'test.json', isDir: false },
+      {
+        method: 'readFile',
+        path: 'test.json',
+        contents: myErr1,
+      },
+      { method: 'stat', path: 'test.json', isDir: false },
+      {
+        method: 'watch',
+        path: 'test.json',
+        options: { recursive: false, signal: undefined },
+        watcher,
+      },
+      { method: 'stat', path: 'test.json', isDir: false },
+      {
+        method: 'readFile',
+        path: 'test.json',
+        contents: '{"hi":"ho"}',
+      },
+      { method: 'mkdir', path: 'dist' },
+      {
+        method: 'writeFile',
+        path: 'dist/test.json',
+        contents: '{"hi":"ho"}',
+      },
+      {
+        method: 'readFile',
+        path: 'test.json',
+        contents: myErr2,
+      },
+      {
+        method: 'readFile',
+        path: 'test.json',
+        contents: '{"le":"la"}',
+      },
+      { method: 'mkdir', path: 'dist' },
+      {
+        method: 'writeFile',
+        path: 'dist/test.json',
+        contents: '{"le":"la"}',
+      },
+    ],
+    __dirname,
+  );
+
+  let i = 0;
+
+  const wtchr = wtch({
+    entry: join(__dirname, 'test.json'),
+    onError: (err) => {
+      switch (i++) {
+        case 0:
+          assert.equal(err, myErr1);
+          watchEvents[0].resolve({
+            eventType: 'change',
+            filename: 'test.json',
+          });
+          break;
+        case 1:
+          assert.equal(err, myErr2);
+          watchEvents[2].resolve({
+            eventType: 'change',
+            filename: 'test.json',
+          });
+          break;
+        default:
+          throw err;
+      }
+    },
+    outDir: join(__dirname, 'dist'),
+    fs,
+  });
+
+  let j = 0;
+  for await (const manifest of wtchr) {
+    switch (j++) {
+      case 0:
+        assert.deepEqual(manifest, {
+          'test.json': 'test.json',
+        });
+        watchEvents[1].resolve({ eventType: 'change', filename: 'test.json' });
+        break;
+      case 1:
+        assert.deepEqual(manifest, {
+          'test.json': 'test.json',
+        });
         break;
       default:
         throw new Error('NEIN');
@@ -462,41 +559,33 @@ type ExpectedCall =
   | ExpectedWriteFile
   | ExpectedWatch;
 
-function createWatcher(signal: AbortSignal) {
-  let next:
-    | null
-    | [(value: IteratorResult<WatchEvent>) => void, (err: Error) => void];
-
-  let lastVal: WatchEvent | null = null;
-
-  signal.addEventListener('abort', async () => {
-    await new Promise((res) => setImmediate(res));
-    if (!next) {
-      throw new Error('NO NEXT');
-    }
-    next[0]({ value: lastVal, done: true });
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (val: T) => void;
+  reject: (error: unknown) => void;
+};
+function defer<T>(): Deferred<T> {
+  let resolve: (val: T) => void;
+  let reject: (error: unknown) => void;
+  let promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
   });
+  return { promise, resolve, reject };
+}
+
+function createWatcher(events: Promise<WatchEvent | Error>[]) {
   return {
-    async emit(event: WatchEvent | Error) {
-      await new Promise((res) => setImmediate(res));
-      if (!next) {
-        throw new Error('NO NEXT');
+    async *[Symbol.asyncIterator]() {
+      for (const event of events) {
+        const next = await event;
+        if (next instanceof Error) {
+          throw next;
+        } else {
+          yield next;
+        }
       }
-      if (event instanceof Error) {
-        next[1](event);
-      } else {
-        lastVal = event;
-        next[0]({ value: event });
-      }
-      next = null;
     },
-    [Symbol.asyncIterator]: () => ({
-      next(): Promise<IteratorResult<WatchEvent>> {
-        return new Promise<IteratorResult<WatchEvent>>((res, rej) => {
-          next = [res, rej];
-        });
-      },
-    }),
   };
 }
 
@@ -521,7 +610,6 @@ function createFs(
     );
     return next as any;
   };
-  // let
   return {
     readdir: async (dir) => {
       const { path, contents } = getNextCall<ExpectedReaddir>(
