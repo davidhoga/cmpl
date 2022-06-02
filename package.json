@@ -17,7 +17,7 @@
     "build:cjs": "npx esbuild src/index.ts --outfile=dist/cjs.js --format=cjs --target=node14 --sourcemap --minify",
     "build": "npm run build:decl && npm run build:esm && npm run build:cjs",
     "test": "node -r esbuild-register src/test.ts",
-    "prepublish": "npm t && npm run build"
+    "prepare": "npm t && npm run build"
   },
   "repository": {
     "type": "git",
