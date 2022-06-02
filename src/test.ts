@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import { relative, join } from 'node:path';
-import { cmpl, contentHash, wtch, WatchFs, WatchEvent } from './index';
+import { cmpl, cntntHsh, wtch, WatchFs, WatchEvent } from './index';
 
 test('copies over a single file', async () => {
   const fs = createFs(
@@ -250,7 +250,7 @@ test('it applies content hashes', async () => {
   assert.deepEqual(
     await cmpl({
       entry: join(__dirname, 'test.json'),
-      rename: contentHash(8),
+      rename: cntntHsh(8),
       outDir: join(__dirname, 'dist'),
       fs,
     }),
@@ -339,7 +339,7 @@ test('watches single file', async () => {
 
   const wtchr = wtch({
     signal: ac.signal,
-    rename: contentHash(2),
+    rename: cntntHsh(2),
     entry: join(__dirname, 'test.json'),
     outDir: join(__dirname, 'dist'),
     fs,
