@@ -147,6 +147,11 @@ export interface WatchFs extends Fs {
   ) => AsyncIterable<WatchEvent>;
 }
 
+export interface WtchOpts extends Omit<CmplOptions, 'fs'> {
+  signal?: AbortSignal;
+  fs?: WatchFs | Promise<WatchFs>;
+}
+
 export async function* wtch({
   signal,
   entry,
@@ -157,10 +162,7 @@ export async function* wtch({
   include = () => true,
   fs = import('node:fs/promises'),
   path = import('node:path'),
-}: Omit<CmplOptions, 'fs'> & {
-  signal?: AbortSignal;
-  fs?: WatchFs | Promise<WatchFs>;
-}) {
+}: WtchOpts) {
   const cmplOpts = {
     entry,
     outDir,
