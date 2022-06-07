@@ -5,518 +5,595 @@ import assert from 'node:assert';
 import { relative, join } from 'node:path';
 import { cmpl, cntntHsh, wtch, WatchFs, WatchEvent } from './index';
 
-test('copies over a single file', async () => {
-  const fs = createFs(
-    [
-      { method: 'stat', path: 'test.json', isDir: false },
-      { method: 'readFile', path: 'test.json', contents: '{"hi":"ho"}' },
-      { method: 'mkdir', path: 'dist' },
-      {
-        method: 'writeFile',
-        path: 'dist/test.json',
-        contents: '{"hi":"ho"}',
-      },
-    ],
-    __dirname,
-  );
+// (async () => {
+//   for await (const mnfst of wtch({
+//     entry: __dirname,
+//     processors: [
+//       {
+//         rename: cntntHsh(1),
+//         outDir: __dirname + '/../dist/test',
+//       },
+//       {
+//         rename: cntntHsh(2),
+//         outDir: __dirname + '/../dist/test',
+//       },
+//     ],
+//   })) {
+//     console.log(mnfst);
+//   }
+// })().catch((err) => {
+//   console.log({ err });
+//   process.exit(1);
+// });
 
-  assert.deepEqual(
-    await cmpl({
-      entry: join(__dirname, 'test.json'),
-      outDir: join(__dirname, 'dist'),
-      fs,
-    }),
-    { 'test.json': 'test.json' },
-  );
-  fs.done();
-});
+test('cmpl', async (t) => {
+  await t.test('copies over a single file', async () => {
+    const fs = createFs(
+      [
+        { method: 'stat', path: 'test.json', isDir: false },
+        { method: 'readFile', path: 'test.json', contents: '{"hi":"ho"}' },
+        { method: 'mkdir', path: 'dist' },
+        {
+          method: 'writeFile',
+          path: 'dist/test.json',
+          contents: '{"hi":"ho"}',
+        },
+      ],
+      __dirname,
+    );
 
-test('copies single file in directory', async () => {
-  const fs = createFs(
-    [
-      { method: 'stat', path: '', isDir: true },
-      { method: 'readdir', path: '', contents: ['test.json'] },
-      { method: 'stat', path: 'test.json', isDir: false },
-      { method: 'readFile', path: 'test.json', contents: '{"hi":"ho"}' },
-      { method: 'mkdir', path: 'dist' },
-      {
-        method: 'writeFile',
-        path: 'dist/test.json',
-        contents: '{"hi":"ho"}',
-      },
-    ],
-    __dirname,
-  );
-
-  assert.deepEqual(
-    await cmpl({
-      entry: __dirname,
-      outDir: join(__dirname, 'dist'),
-      fs,
-    }),
-    { 'test.json': 'test.json' },
-  );
-  fs.done();
-});
-
-test('copies files in nested directories', async () => {
-  const fs = createFs(
-    [
-      { method: 'stat', path: '', isDir: true },
-      { method: 'readdir', path: '', contents: ['test.json', 'deep'] },
-      { method: 'stat', path: 'test.json', isDir: false },
-      { method: 'stat', path: 'deep', isDir: true },
-      { method: 'readdir', path: 'deep', contents: ['test2.json'] },
-      { method: 'stat', path: 'deep/test2.json', isDir: false },
-      { method: 'readFile', path: 'test.json', contents: '{"hi":"ho"}' },
-      {
-        method: 'readFile',
-        path: 'deep/test2.json',
-        contents: '{"hü":"hott"}',
-      },
-      { method: 'mkdir', path: 'dist' },
-      {
-        method: 'writeFile',
-        path: 'dist/test.json',
-        contents: '{"hi":"ho"}',
-      },
-      { method: 'mkdir', path: 'dist/deep' },
-      {
-        method: 'writeFile',
-        path: 'dist/deep/test2.json',
-        contents: '{"hü":"hott"}',
-      },
-    ],
-    __dirname,
-  );
-
-  assert.deepEqual(
-    await cmpl({
-      entry: __dirname,
-      outDir: join(__dirname, 'dist'),
-      fs,
-    }),
-    {
-      'deep/test2.json': 'deep/test2.json',
-      'test.json': 'test.json',
-    },
-  );
-  fs.done();
-});
-
-test('it ignores nested folders', async () => {
-  const fs = createFs(
-    [
-      { method: 'stat', path: '', isDir: true },
-      { method: 'readdir', path: '', contents: ['test.json', 'deep'] },
-      { method: 'stat', path: 'test.json', isDir: false },
-      { method: 'stat', path: 'deep', isDir: true },
-      { method: 'readFile', path: 'test.json', contents: '{"hi":"ho"}' },
-      { method: 'mkdir', path: 'dist' },
-      {
-        method: 'writeFile',
-        path: 'dist/test.json',
-        contents: '{"hi":"ho"}',
-      },
-    ],
-    __dirname,
-  );
-
-  assert.deepEqual(
-    await cmpl({
-      entry: __dirname,
-      recursive: false,
-      outDir: join(__dirname, 'dist'),
-      fs,
-    }),
-    {
-      'test.json': 'test.json',
-    },
-  );
-  fs.done();
-});
-
-test('it ignores specific files', async () => {
-  const fs = createFs(
-    [
-      { method: 'stat', path: '', isDir: true },
-      {
-        method: 'readdir',
-        path: '',
-        contents: ['test.json', 'test2.json', 'deep'],
-      },
-      { method: 'stat', path: 'test.json', isDir: false },
-      { method: 'stat', path: 'test2.json', isDir: false },
-      { method: 'stat', path: 'deep', isDir: true },
-      { method: 'readFile', path: 'test.json', contents: '{"hi":"ho"}' },
-      { method: 'mkdir', path: 'dist' },
-      {
-        method: 'writeFile',
-        path: 'dist/test.json',
-        contents: '{"hi":"ho"}',
-      },
-    ],
-    __dirname,
-  );
-
-  let i = 0;
-  assert.deepEqual(
-    await cmpl({
-      entry: __dirname,
-      recursive: false,
-      include: (name, isDir) => {
-        switch (i++) {
-          case 0:
-            assert.equal(name, 'test.json');
-            assert.equal(isDir, false);
-            break;
-          case 1:
-            assert.equal(name, 'test2.json');
-            assert.equal(isDir, false);
-            break;
-          case 0:
-            assert.equal(name, 'deep');
-            assert.equal(isDir, true);
-            break;
-        }
-        return name === 'test.json';
-      },
-      outDir: join(__dirname, 'dist'),
-      fs,
-    }),
-    {
-      'test.json': 'test.json',
-    },
-  );
-  fs.done();
-});
-
-test('it transforms contents', async () => {
-  const fs = createFs(
-    [
-      { method: 'stat', path: 'test.json', isDir: false },
-      {
-        method: 'readFile',
-        path: 'test.json',
-        contents: 'rofl',
-      },
-      { method: 'mkdir', path: 'dist' },
-      {
-        method: 'writeFile',
-        path: 'dist/test.json',
-        contents: 'leeeeel',
-      },
-    ],
-    __dirname,
-  );
-
-  assert.deepEqual(
-    await cmpl({
-      entry: join(__dirname, 'test.json'),
-      transform: (content, file) => {
-        assert.equal(file, '');
-        assert.equal(content.toString(), 'rofl');
-        return Buffer.from('leeeeel');
-      },
-      outDir: join(__dirname, 'dist'),
-      fs,
-    }),
-    {
-      'test.json': 'test.json',
-    },
-  );
-  fs.done();
-});
-
-test('it applies content hashes', async () => {
-  const fs = createFs(
-    [
-      { method: 'stat', path: 'test.json', isDir: false },
-      {
-        method: 'readFile',
-        path: 'test.json',
-        contents: '{"hi":"ho"}',
-      },
-      { method: 'mkdir', path: 'dist' },
-      {
-        method: 'writeFile',
-        path: 'dist/test-DF67FD3A.json',
-        contents: '{"hi":"ho"}',
-      },
-    ],
-    __dirname,
-  );
-
-  assert.deepEqual(
-    await cmpl({
-      entry: join(__dirname, 'test.json'),
-      rename: cntntHsh(8),
-      outDir: join(__dirname, 'dist'),
-      fs,
-    }),
-    {
-      'test.json': 'test-DF67FD3A.json',
-    },
-  );
-  fs.done();
-});
-
-test('it creates custom file names', async () => {
-  const fs = createFs(
-    [
-      { method: 'stat', path: 'test.json', isDir: false },
-      {
-        method: 'readFile',
-        path: 'test.json',
-        contents: '{"hi":"ho"}',
-      },
-      { method: 'mkdir', path: 'dist' },
-      {
-        method: 'writeFile',
-        path: 'dist/q3p45giunrfd.f35r',
-        contents: '{"hi":"ho"}',
-      },
-    ],
-    __dirname,
-  );
-
-  assert.deepEqual(
-    await cmpl({
-      entry: join(__dirname, 'test.json'),
-      rename: (name, content) => {
-        assert.equal(name, 'test.json');
-        assert.equal(content.toString(), '{"hi":"ho"}');
-        return 'q3p45giunrfd.f35r';
-      },
-      outDir: join(__dirname, 'dist'),
-      fs,
-    }),
-    {
-      'test.json': 'q3p45giunrfd.f35r',
-    },
-  );
-  fs.done();
-});
-
-test('watches single file', async () => {
-  const watchEvents: Deferred<WatchEvent>[] = [defer()];
-  const watcher = createWatcher(watchEvents.map(({ promise }) => promise));
-  const fs = createFs(
-    [
-      { method: 'stat', path: 'test.json', isDir: false },
-      {
-        method: 'readFile',
-        path: 'test.json',
-        contents: '{"hi":"ho"}',
-      },
-      { method: 'mkdir', path: 'dist' },
-      {
-        method: 'writeFile',
-        path: 'dist/test-DF.json',
-        contents: '{"hi":"ho"}',
-      },
-      { method: 'stat', path: 'test.json', isDir: false },
-      {
-        method: 'watch',
-        path: 'test.json',
-        options: { recursive: false, signal: undefined },
-        watcher,
-      },
-      {
-        method: 'readFile',
-        path: 'test.json',
-        contents: '{"ho":"hi"}',
-      },
-      { method: 'mkdir', path: 'dist' },
-      {
-        method: 'writeFile',
-        path: 'dist/test-9E.json',
-        contents: '{"ho":"hi"}',
-      },
-    ],
-    __dirname,
-  );
-
-  const wtchr = wtch({
-    rename: cntntHsh(2),
-    entry: join(__dirname, 'test.json'),
-    outDir: join(__dirname, 'dist'),
-    fs,
+    assert.deepEqual(
+      await cmpl({
+        entry: join(__dirname, 'test.json'),
+        processors: [
+          {
+            outDir: join(__dirname, 'dist'),
+          },
+        ],
+        fs,
+      }),
+      { 'test.json': 'test.json' },
+    );
+    fs.done();
   });
 
-  let i = 0;
-  for await (const manifest of wtchr) {
-    switch (i++) {
-      case 0:
-        assert.deepEqual(manifest, {
-          'test.json': 'test-DF.json',
-        });
-        watchEvents[0].resolve({ eventType: 'change', filename: 'test.json' });
-        break;
-      case 1:
-        assert.deepEqual(manifest, {
-          'test.json': 'test-9E.json',
-        });
-        break;
-      default:
-        throw new Error('NEIN');
-    }
-  }
-  fs.done();
-});
+  await t.test('copies single file in directory', async () => {
+    const fs = createFs(
+      [
+        { method: 'stat', path: '', isDir: true },
+        { method: 'readdir', path: '', contents: ['test.json'] },
+        { method: 'stat', path: 'test.json', isDir: false },
+        { method: 'readFile', path: 'test.json', contents: '{"hi":"ho"}' },
+        { method: 'mkdir', path: 'dist' },
+        {
+          method: 'writeFile',
+          path: 'dist/test.json',
+          contents: '{"hi":"ho"}',
+        },
+      ],
+      __dirname,
+    );
 
-test('ignores newly added files', async () => {
-  const watchEvents: Deferred<WatchEvent>[] = [defer()];
-  const watcher = createWatcher(watchEvents.map(({ promise }) => promise));
-  const fs = createFs(
-    [
-      { method: 'stat', path: '', isDir: true },
-      { method: 'readdir', path: '', contents: ['test.json'] },
-      { method: 'stat', path: 'test.json', isDir: false },
-      {
-        method: 'readFile',
-        path: 'test.json',
-        contents: '{"hi":"ho"}',
-      },
-      { method: 'mkdir', path: 'dist' },
-      {
-        method: 'writeFile',
-        path: 'dist/test.json',
-        contents: '{"hi":"ho"}',
-      },
-      { method: 'stat', path: '', isDir: true },
-      {
-        method: 'watch',
-        path: '',
-        options: { recursive: true, signal: undefined },
-        watcher,
-      },
-    ],
-    __dirname,
-  );
-
-  const wtchr = wtch({
-    entry: __dirname,
-    include: (name) => name === 'test.json',
-    outDir: join(__dirname, 'dist'),
-    fs,
+    assert.deepEqual(
+      await cmpl({
+        entry: __dirname,
+        processors: [
+          {
+            outDir: join(__dirname, 'dist'),
+          },
+        ],
+        fs,
+      }),
+      { 'test.json': 'test.json' },
+    );
+    fs.done();
   });
 
-  let i = 0;
-  for await (const manifest of wtchr) {
-    switch (i++) {
-      case 0:
-        assert.deepEqual(manifest, {
-          'test.json': 'test.json',
-        });
-        watchEvents[0].resolve({ eventType: 'change', filename: 'test2.json' });
-        break;
-      default:
-        throw new Error('NEIN');
-    }
-  }
-  fs.done();
-});
+  await t.test('copies files in nested directories', async () => {
+    const fs = createFs(
+      [
+        { method: 'stat', path: '', isDir: true },
+        { method: 'readdir', path: '', contents: ['test.json', 'deep'] },
+        { method: 'stat', path: 'test.json', isDir: false },
+        { method: 'stat', path: 'deep', isDir: true },
+        { method: 'readdir', path: 'deep', contents: ['test2.json'] },
+        { method: 'stat', path: 'deep/test2.json', isDir: false },
+        { method: 'readFile', path: 'test.json', contents: '{"hi":"ho"}' },
+        {
+          method: 'readFile',
+          path: 'deep/test2.json',
+          contents: '{"hü":"hott"}',
+        },
+        { method: 'mkdir', path: 'dist' },
+        {
+          method: 'writeFile',
+          path: 'dist/test.json',
+          contents: '{"hi":"ho"}',
+        },
+        { method: 'mkdir', path: 'dist/deep' },
+        {
+          method: 'writeFile',
+          path: 'dist/deep/test2.json',
+          contents: '{"hü":"hott"}',
+        },
+      ],
+      __dirname,
+    );
 
-test('continues watching despite error', async () => {
-  const watchEvents: Deferred<WatchEvent>[] = [defer(), defer(), defer()];
-  const watcher = createWatcher(watchEvents.map(({ promise }) => promise));
-  const myErr1 = new Error('Err1');
-  const myErr2 = new Error('Err2');
-  const fs = createFs(
-    [
-      { method: 'stat', path: 'test.json', isDir: false },
+    assert.deepEqual(
+      await cmpl({
+        entry: __dirname,
+        processors: [
+          {
+            outDir: join(__dirname, 'dist'),
+          },
+        ],
+        fs,
+      }),
       {
-        method: 'readFile',
-        path: 'test.json',
-        contents: myErr1,
+        'deep/test2.json': 'deep/test2.json',
+        'test.json': 'test.json',
       },
-      { method: 'stat', path: 'test.json', isDir: false },
-      {
-        method: 'watch',
-        path: 'test.json',
-        options: { recursive: false, signal: undefined },
-        watcher,
-      },
-      { method: 'stat', path: 'test.json', isDir: false },
-      {
-        method: 'readFile',
-        path: 'test.json',
-        contents: '{"hi":"ho"}',
-      },
-      { method: 'mkdir', path: 'dist' },
-      {
-        method: 'writeFile',
-        path: 'dist/test.json',
-        contents: '{"hi":"ho"}',
-      },
-      {
-        method: 'readFile',
-        path: 'test.json',
-        contents: myErr2,
-      },
-      {
-        method: 'readFile',
-        path: 'test.json',
-        contents: '{"le":"la"}',
-      },
-      { method: 'mkdir', path: 'dist' },
-      {
-        method: 'writeFile',
-        path: 'dist/test.json',
-        contents: '{"le":"la"}',
-      },
-    ],
-    __dirname,
-  );
+    );
+    fs.done();
+  });
 
-  let i = 0;
+  await t.test('it ignores nested folders', async () => {
+    const fs = createFs(
+      [
+        { method: 'stat', path: '', isDir: true },
+        { method: 'readdir', path: '', contents: ['test.json', 'deep'] },
+        { method: 'stat', path: 'test.json', isDir: false },
+        { method: 'stat', path: 'deep', isDir: true },
+        { method: 'readFile', path: 'test.json', contents: '{"hi":"ho"}' },
+        { method: 'mkdir', path: 'dist' },
+        {
+          method: 'writeFile',
+          path: 'dist/test.json',
+          contents: '{"hi":"ho"}',
+        },
+      ],
+      __dirname,
+    );
 
-  const wtchr = wtch({
-    entry: join(__dirname, 'test.json'),
-    onError: (err) => {
+    assert.deepEqual(
+      await cmpl({
+        entry: __dirname,
+        processors: [
+          {
+            recursive: false,
+            outDir: join(__dirname, 'dist'),
+          },
+        ],
+        fs,
+      }),
+      {
+        'test.json': 'test.json',
+      },
+    );
+    fs.done();
+  });
+
+  await t.test('it ignores specific files', async () => {
+    const fs = createFs(
+      [
+        { method: 'stat', path: '', isDir: true },
+        {
+          method: 'readdir',
+          path: '',
+          contents: ['test.json', 'test2.json', 'deep'],
+        },
+        { method: 'stat', path: 'test.json', isDir: false },
+        { method: 'stat', path: 'test2.json', isDir: false },
+        { method: 'stat', path: 'deep', isDir: true },
+        { method: 'readFile', path: 'test.json', contents: '{"hi":"ho"}' },
+        { method: 'mkdir', path: 'dist' },
+        {
+          method: 'writeFile',
+          path: 'dist/test.json',
+          contents: '{"hi":"ho"}',
+        },
+      ],
+      __dirname,
+    );
+
+    let i = 0;
+    assert.deepEqual(
+      await cmpl({
+        entry: __dirname,
+        processors: [
+          {
+            include: (name, isDir) => {
+              switch (i++) {
+                case 0:
+                  assert.equal(name, 'test.json');
+                  assert.equal(isDir, false);
+                  break;
+                case 1:
+                  assert.equal(name, 'test2.json');
+                  assert.equal(isDir, false);
+                  break;
+                case 2:
+                  assert.equal(name, 'deep');
+                  assert.equal(isDir, true);
+                  break;
+              }
+
+              return name === 'test.json';
+            },
+            outDir: join(__dirname, 'dist'),
+          },
+        ],
+        fs,
+      }),
+      {
+        'test.json': 'test.json',
+      },
+    );
+    fs.done();
+  });
+
+  await t.test('it transforms contents', async () => {
+    const fs = createFs(
+      [
+        { method: 'stat', path: 'test.json', isDir: false },
+        {
+          method: 'readFile',
+          path: 'test.json',
+          contents: 'rofl',
+        },
+        { method: 'mkdir', path: 'dist' },
+        {
+          method: 'writeFile',
+          path: 'dist/test.json',
+          contents: 'leeeeel',
+        },
+      ],
+      __dirname,
+    );
+
+    assert.deepEqual(
+      await cmpl({
+        entry: join(__dirname, 'test.json'),
+        processors: [
+          {
+            transform: (content, file) => {
+              assert.equal(file, '');
+              assert.equal(content.toString(), 'rofl');
+              return Buffer.from('leeeeel');
+            },
+            outDir: join(__dirname, 'dist'),
+          },
+        ],
+        fs,
+      }),
+      {
+        'test.json': 'test.json',
+      },
+    );
+    fs.done();
+  });
+
+  await t.test('it applies content hashes', async () => {
+    const fs = createFs(
+      [
+        { method: 'stat', path: 'test.json', isDir: false },
+        {
+          method: 'readFile',
+          path: 'test.json',
+          contents: '{"hi":"ho"}',
+        },
+        { method: 'mkdir', path: 'dist' },
+        {
+          method: 'writeFile',
+          path: 'dist/test-DF67FD3A.json',
+          contents: '{"hi":"ho"}',
+        },
+      ],
+      __dirname,
+    );
+
+    assert.deepEqual(
+      await cmpl({
+        entry: join(__dirname, 'test.json'),
+        processors: [
+          {
+            outDir: join(__dirname, 'dist'),
+            rename: cntntHsh(8),
+          },
+        ],
+        fs,
+      }),
+      {
+        'test.json': 'test-DF67FD3A.json',
+      },
+    );
+    fs.done();
+  });
+
+  await t.test('it creates custom file names', async () => {
+    const fs = createFs(
+      [
+        { method: 'stat', path: 'test.json', isDir: false },
+        {
+          method: 'readFile',
+          path: 'test.json',
+          contents: '{"hi":"ho"}',
+        },
+        { method: 'mkdir', path: 'dist' },
+        {
+          method: 'writeFile',
+          path: 'dist/q3p45giunrfd.f35r',
+          contents: '{"hi":"ho"}',
+        },
+      ],
+      __dirname,
+    );
+
+    assert.deepEqual(
+      await cmpl({
+        entry: join(__dirname, 'test.json'),
+        processors: [
+          {
+            rename: (name, content) => {
+              assert.equal(name, 'test.json');
+              assert.equal(content.toString(), '{"hi":"ho"}');
+              return 'q3p45giunrfd.f35r';
+            },
+            outDir: join(__dirname, 'dist'),
+          },
+        ],
+
+        fs,
+      }),
+      {
+        'test.json': 'q3p45giunrfd.f35r',
+      },
+    );
+    fs.done();
+  });
+
+  await t.test('watches single file', async () => {
+    const watchEvents: Deferred<WatchEvent>[] = [defer()];
+    const watcher = createWatcher(watchEvents.map(({ promise }) => promise));
+    const fs = createFs(
+      [
+        { method: 'stat', path: 'test.json', isDir: false },
+        {
+          method: 'readFile',
+          path: 'test.json',
+          contents: '{"hi":"ho"}',
+        },
+        { method: 'mkdir', path: 'dist' },
+        {
+          method: 'writeFile',
+          path: 'dist/test-DF.json',
+          contents: '{"hi":"ho"}',
+        },
+        { method: 'stat', path: 'test.json', isDir: false },
+        {
+          method: 'watch',
+          path: 'test.json',
+          options: { recursive: false, signal: undefined },
+          watcher,
+        },
+        {
+          method: 'readFile',
+          path: 'test.json',
+          contents: '{"ho":"hi"}',
+        },
+        { method: 'mkdir', path: 'dist' },
+        {
+          method: 'writeFile',
+          path: 'dist/test-9E.json',
+          contents: '{"ho":"hi"}',
+        },
+      ],
+      __dirname,
+    );
+
+    const wtchr = wtch({
+      processors: [
+        {
+          outDir: join(__dirname, 'dist'),
+          rename: cntntHsh(2),
+        },
+      ],
+      entry: join(__dirname, 'test.json'),
+      fs,
+    });
+
+    let i = 0;
+    for await (const manifest of wtchr) {
       switch (i++) {
         case 0:
-          assert.equal(err, myErr1);
+          assert.deepEqual(manifest, {
+            'test.json': 'test-DF.json',
+          });
           watchEvents[0].resolve({
             eventType: 'change',
             filename: 'test.json',
           });
           break;
         case 1:
-          assert.equal(err, myErr2);
-          watchEvents[2].resolve({
+          assert.deepEqual(manifest, {
+            'test.json': 'test-9E.json',
+          });
+          break;
+        default:
+          throw new Error('NEIN');
+      }
+    }
+    fs.done();
+  });
+
+  await t.test('ignores newly added files', async () => {
+    const watchEvents: Deferred<WatchEvent>[] = [defer()];
+    const watcher = createWatcher(watchEvents.map(({ promise }) => promise));
+    const fs = createFs(
+      [
+        { method: 'stat', path: '', isDir: true },
+        { method: 'readdir', path: '', contents: ['test.json'] },
+        { method: 'stat', path: 'test.json', isDir: false },
+        {
+          method: 'readFile',
+          path: 'test.json',
+          contents: '{"hi":"ho"}',
+        },
+        { method: 'mkdir', path: 'dist' },
+        {
+          method: 'writeFile',
+          path: 'dist/test.json',
+          contents: '{"hi":"ho"}',
+        },
+        { method: 'stat', path: '', isDir: true },
+        {
+          method: 'watch',
+          path: '',
+          options: { recursive: true, signal: undefined },
+          watcher,
+        },
+      ],
+      __dirname,
+    );
+
+    const wtchr = wtch({
+      entry: __dirname,
+      processors: [
+        {
+          include: (name) => name === 'test.json',
+          outDir: join(__dirname, 'dist'),
+        },
+      ],
+      fs,
+    });
+
+    let i = 0;
+    for await (const manifest of wtchr) {
+      switch (i++) {
+        case 0:
+          assert.deepEqual(manifest, {
+            'test.json': 'test.json',
+          });
+          watchEvents[0].resolve({
+            eventType: 'change',
+            filename: 'test2.json',
+          });
+          break;
+        default:
+          throw new Error('NEIN');
+      }
+    }
+    fs.done();
+  });
+
+  await t.test('continues watching despite error', async () => {
+    const watchEvents: Deferred<WatchEvent>[] = [defer(), defer(), defer()];
+    const watcher = createWatcher(watchEvents.map(({ promise }) => promise));
+    const myErr1 = new Error('Err1');
+    const myErr2 = new Error('Err2');
+    const fs = createFs(
+      [
+        { method: 'stat', path: 'test.json', isDir: false },
+        {
+          method: 'readFile',
+          path: 'test.json',
+          contents: myErr1,
+        },
+        { method: 'stat', path: 'test.json', isDir: false },
+        {
+          method: 'watch',
+          path: 'test.json',
+          options: { recursive: false, signal: undefined },
+          watcher,
+        },
+        { method: 'stat', path: 'test.json', isDir: false },
+        {
+          method: 'readFile',
+          path: 'test.json',
+          contents: '{"hi":"ho"}',
+        },
+        { method: 'mkdir', path: 'dist' },
+        {
+          method: 'writeFile',
+          path: 'dist/test.json',
+          contents: '{"hi":"ho"}',
+        },
+        {
+          method: 'readFile',
+          path: 'test.json',
+          contents: myErr2,
+        },
+        {
+          method: 'readFile',
+          path: 'test.json',
+          contents: '{"le":"la"}',
+        },
+        { method: 'mkdir', path: 'dist' },
+        {
+          method: 'writeFile',
+          path: 'dist/test.json',
+          contents: '{"le":"la"}',
+        },
+      ],
+      __dirname,
+    );
+
+    let i = 0;
+
+    const wtchr = wtch({
+      entry: join(__dirname, 'test.json'),
+      onError: (err) => {
+        switch (i++) {
+          case 0:
+            assert.equal(err, myErr1);
+            watchEvents[0].resolve({
+              eventType: 'change',
+              filename: 'test.json',
+            });
+            break;
+          case 1:
+            assert.equal(err, myErr2);
+            watchEvents[2].resolve({
+              eventType: 'change',
+              filename: 'test.json',
+            });
+            break;
+          default:
+            throw err;
+        }
+      },
+      processors: [
+        {
+          outDir: join(__dirname, 'dist'),
+        },
+      ],
+      fs,
+    });
+
+    let j = 0;
+    for await (const manifest of wtchr) {
+      switch (j++) {
+        case 0:
+          assert.deepEqual(manifest, {
+            'test.json': 'test.json',
+          });
+          watchEvents[1].resolve({
             eventType: 'change',
             filename: 'test.json',
           });
           break;
+        case 1:
+          assert.deepEqual(manifest, {
+            'test.json': 'test.json',
+          });
+          break;
         default:
-          throw err;
+          throw new Error('NEIN');
       }
-    },
-    outDir: join(__dirname, 'dist'),
-    fs,
-  });
-
-  let j = 0;
-  for await (const manifest of wtchr) {
-    switch (j++) {
-      case 0:
-        assert.deepEqual(manifest, {
-          'test.json': 'test.json',
-        });
-        watchEvents[1].resolve({ eventType: 'change', filename: 'test.json' });
-        break;
-      case 1:
-        assert.deepEqual(manifest, {
-          'test.json': 'test.json',
-        });
-        break;
-      default:
-        throw new Error('NEIN');
     }
-  }
-  fs.done();
+    fs.done();
+  });
 });
 
 interface ExpectedReaddir {

@@ -25,21 +25,26 @@ import { cmpl, wtch, CmplOptions } from 'cmpl';
 
 const options: CmplOptions = {
   /* path to entry file or directory */
-  entry: __dirname,
-  /* path to directory where files should be moved to */
-  outDir: __dirname + '/out',
-  /* if entry is directory, do we care about child dirs? */
-  // recursive?: boolean; // default: true
-  /* function to transform file contents */
-  // transform?: TransformFn; // default: no-op
-  /* function to determine the output name based on input name and 
-     transformed content */
-  // rename?: FileNamerFn; // default: no-op
-  /* filter function to determine if a file should be included */
-  // include?: (name: string) => boolean; // default: () => true
-  /* might be a custom node:path implementation */
+  entry: __dirname + '/src',
+  /* list of file processors, these run in parallel */
+  processors: [
+    {
+      /* path to directory where files should be moved to */
+      outDir: __dirname + '/dist',
+      /* if entry is directory, do we care about child dirs? */
+      // recursive?: boolean; // default: true
+      /* function to transform file contents */
+      // transform?: TransformFn; // default: no-op
+      /* function to determine the output name based on input name and
+         transformed content */
+      // rename?: FileNamerFn; // default: no-op
+      /* filter function to determine if a file should be included */
+      // include?: (name: string) => boolean; // default: () => true
+    },
+  ],
+  /* custom node:path implementation */
   // path?: Path | Promise<Path>; // default: import('node:path')
-  /* might be a custom node:fs/promises implementation */
+  /* custom node:fs/promises implementation */
   // fs?: Fs | Promise<Fs>; // default: import('node:fs/promises')
 };
 

@@ -28,13 +28,16 @@ export type FileNamerFn = (
   originalName: string,
   contents: Buffer,
 ) => string | Promise<string>;
-export interface CmplOptions {
-  entry: string;
+export interface Prcssr {
   outDir: string;
   recursive?: boolean;
   rename?: FileNamerFn;
   include?: (name: string, isDir: boolean) => boolean;
   transform?: TransformFn;
+}
+export interface CmplOptions {
+  entry: string;
+  processors: Prcssr[];
   path?: Path | Promise<Path>;
   fs?: Fs | Promise<Fs>;
 }
@@ -60,78 +63,127 @@ export async function prcss(
   file: string,
   {
     entry,
-    outDir,
-    transform = (b) => b,
     fs = import('node:fs/promises'),
     path = import('node:path'),
-    rename = async (p) => (await path).basename(p),
-  }: Pick<
-    CmplOptions,
-    'entry' | 'outDir' | 'rename' | 'transform' | 'fs' | 'path'
-  >,
-) {
+  }: Pick<CmplOptions, 'entry' | 'fs' | 'path'>,
+  processors: (Prcssr | null)[],
+): Promise<(null | Record<string, string>)[]> {
   const { relative, dirname, join } = await path;
   const { readFile, mkdir, writeFile } = await fs;
-
+  const contentsP = readFile(file);
   const inName = relative(entry, dirname(file));
-  const contents = await transform(await readFile(file), inName);
-  const name = await rename(relative(entry, file), contents);
-  const targerDir = join(outDir, relative(entry, dirname(file)));
-  const targetFile = join(targerDir, name);
 
-  await mkdir(targerDir, { recursive: true });
-  await writeFile(targetFile, contents);
+  return Promise.all(
+    processors.map(async (p) => {
+      if (!p) {
+        return p;
+      }
+      const {
+        outDir,
+        transform = (b) => b,
+        rename = async (p) => (await path).basename(p),
+      } = p;
+      const contents = await transform(await contentsP, inName);
+      const name = await rename(relative(entry, file), contents);
+      const targerDir = join(outDir, relative(entry, dirname(file)));
+      const targetFile = join(targerDir, name);
 
-  return { [relative(entry, file)]: relative(outDir, targetFile) };
+      await mkdir(targerDir, { recursive: true });
+      await writeFile(targetFile, contents);
+      return { [relative(entry, file)]: relative(outDir, targetFile) };
+    }),
+  );
 }
 
 export async function cmpl({
   entry,
-  outDir,
-  recursive = true,
-  rename,
-  transform,
-  include = () => true,
+  processors,
   fs = import('node:fs/promises'),
   path = import('node:path'),
 }: CmplOptions) {
-  const manifest: Record<string, string> = {};
+  const manifest: Record<string, string>[] = Array.from({
+    length: processors.length,
+  }).map(() => ({}));
   const { relative, join, dirname } = await path;
   const { readdir, stat } = await fs;
-  const processOpts = {
-    entry,
-    outDir,
-    rename,
-    transform,
-    fs,
-    path,
+  let entryDir: string | null;
+
+  const handle = async (
+    subEntry: string,
+    parentDir: string,
+    processors: (Prcssr | null)[],
+  ) => {
+    const entryPath = join(parentDir, subEntry);
+    const isDir = (await stat(entryPath)).isDirectory();
+    if (!entryDir) {
+      entryDir = isDir ? entry : dirname(entry);
+    }
+
+    if (isDir) {
+      let relevantDir = false;
+      const dirProcessors = processors.map((p) => {
+        const incl =
+          p &&
+          (subEntry === entry ||
+            (p.recursive !== false &&
+              (!p.include || p.include(relative(entryDir!, entryPath), true))));
+        if (incl) {
+          relevantDir = true;
+        }
+        return incl ? p : null;
+      });
+
+      if (relevantDir) {
+        await readDir(entryPath, dirProcessors);
+      }
+    }
+
+    if (!isDir) {
+      let relevantFile = false;
+      const fileProcessors = processors.map((p) => {
+        const incl =
+          p && (!p.include || p.include(relative(entryDir!, entryPath), false))
+            ? p
+            : null;
+
+        if (incl) {
+          relevantFile = true;
+        }
+        return incl;
+      });
+
+      if (!relevantFile) {
+        return;
+      }
+
+      (
+        await prcss(
+          entryPath,
+          { fs, path, entry: entry === subEntry ? entryDir! : entry },
+          fileProcessors,
+        )
+      ).forEach((v, i) => {
+        if (v !== null) {
+          Object.assign(manifest[i], v);
+        }
+      });
+    }
   };
 
-  const read = async (dir: string): Promise<void> => {
+  const readDir = async (
+    dir: string,
+    processors: (Prcssr | null)[],
+  ): Promise<void> => {
     await Promise.all(
-      (
-        await readdir(dir)
-      ).map(async (f) => {
-        if ((await stat(join(dir, f))).isDirectory()) {
-          if (recursive && include(relative(entry, join(dir, f)), true)) {
-            return read(join(dir, f));
-          } else {
-            return;
-          }
-        }
-
-        if (include(relative(entry, join(dir, f)), false)) {
-          Object.assign(manifest, await prcss(join(dir, f), processOpts));
-        }
-      }),
+      (await readdir(dir)).map((e) => handle(e, dir, processors)),
     );
   };
 
-  if (!(await stat(entry)).isDirectory()) {
-    return prcss(entry, { ...processOpts, entry: dirname(entry) });
-  }
+  await handle(entry, '', processors);
 
-  await read(entry);
+  if (processors.length === 1) {
+    return manifest[0];
+  }
 
   return manifest;
 }
@@ -150,50 +202,42 @@ export interface WatchFs extends Fs {
 export interface WtchOpts extends Omit<CmplOptions, 'fs'> {
   signal?: AbortSignal;
   fs?: WatchFs | Promise<WatchFs>;
-  onError?: 'ignore' | 'throw' | ((err: unknown) => void);
+  onError?: (err: unknown) => void;
 }
 
 export async function* wtch({
   signal,
   entry,
-  outDir,
-  recursive = true,
-  rename,
-  transform,
-  include = () => true,
+  processors,
   onError = process.env.CI
-    ? 'throw'
+    ? (err) => {
+        throw err;
+      }
     : (err) => console.log(err instanceof Error ? err.message : err),
   fs = import('node:fs/promises'),
   path = import('node:path'),
 }: WtchOpts) {
   const cmplOpts = {
     entry,
-    outDir,
-    recursive,
-    rename,
-    transform,
-    include,
     fs,
+    processors,
     path,
   };
   const { join, dirname } = await path;
   const { watch, stat } = await fs;
-  const handleError = (err: unknown) => {
-    if (onError === 'ignore') {
-      return;
-    } else if (onError === 'throw') {
-      throw err;
-    }
-    onError(err);
-  };
 
-  let manifest: Record<string, string> | null = null;
+  let manifest: Record<string, string>[] | null = null;
+  const exportManifest = () =>
+    manifest!.length === 1
+      ? Object.assign({}, manifest![0])
+      : manifest!.map((m) => Object.assign({}, m));
+
   try {
-    manifest = await cmpl(cmplOpts);
-    yield Object.assign({}, manifest);
+    const m = await cmpl(cmplOpts);
+    manifest = Array.isArray(m) ? m : [m];
+    yield exportManifest();
   } catch (err) {
-    handleError(err);
+    onError(err);
   }
 
   const isDir = (await stat(entry)).isDirectory();
@@ -205,41 +249,66 @@ export async function* wtch({
         entry: baseDir,
       };
 
+  const recursive = processors.some(({ recursive }) => recursive !== false);
+
   for await (const event of watch(entry, {
     recursive: isDir ? recursive : false,
     signal,
   })) {
     try {
       if (!manifest) {
-        manifest = await cmpl(cmplOpts);
-        yield Object.assign({}, manifest);
+        const m = await cmpl(cmplOpts);
+        manifest = Array.isArray(m) ? m : [m];
+        yield exportManifest();
       } else {
         switch (event.eventType) {
-          case 'change':
-            if (include(event.filename, false)) {
-              Object.assign(
-                manifest,
-                await prcss(join(baseDir, event.filename), prcssOpts),
-              );
-              yield Object.assign({}, manifest);
+          case 'rename': {
+            const exists = manifest.some((m) => m[event.filename]);
+            if (exists) {
+              manifest.forEach((m) => {
+                if (m[event.filename]) {
+                  delete m[event.filename];
+                }
+              });
+              yield exportManifest();
+
+              break;
+            }
+          }
+          case 'change': {
+            let relevantChange = false;
+            const changeProcessors = processors.map((p) => {
+              const incl =
+                p && (!p.include || p.include(event.filename, false))
+                  ? p
+                  : null;
+
+              if (incl) {
+                relevantChange = true;
+              }
+              return incl;
+            });
+
+            if (relevantChange) {
+              (
+                await prcss(
+                  join(baseDir, event.filename),
+                  prcssOpts,
+                  changeProcessors,
+                )
+              ).forEach((v, i) => {
+                if (v !== null) {
+                  Object.assign(manifest![i], v);
+                }
+              });
+              yield exportManifest();
             }
             break;
-          case 'rename':
-            if (manifest[event.filename]) {
-              delete manifest[event.filename];
-              yield Object.assign({}, manifest);
-            } else if (include(event.filename, false)) {
-              Object.assign(
-                manifest,
-                await prcss(join(baseDir, event.filename), prcssOpts),
-              );
-              yield Object.assign({}, manifest);
-            }
-            break;
+          }
         }
       }
     } catch (err) {
-      handleError(err);
+      onError(err);
     }
   }
 }
