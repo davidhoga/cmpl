@@ -71,7 +71,7 @@ export async function prcss(
   const { relative, dirname, join } = await path;
   const { readFile, mkdir, writeFile } = await fs;
   const contentsP = readFile(file);
-  const inName = relative(entry, dirname(file));
+  const inName = relative(entry, file);
 
   return Promise.all(
     processors.map(async (p) => {
@@ -84,13 +84,13 @@ export async function prcss(
         rename = async (p) => (await path).basename(p),
       } = p;
       const contents = await transform(await contentsP, inName);
-      const name = await rename(relative(entry, file), contents);
+      const name = await rename(inName, contents);
       const targerDir = join(outDir, relative(entry, dirname(file)));
       const targetFile = join(targerDir, name);
 
       await mkdir(targerDir, { recursive: true });
       await writeFile(targetFile, contents);
-      return { [relative(entry, file)]: relative(outDir, targetFile) };
+      return { [inName]: relative(outDir, targetFile) };
     }),
   );
 }

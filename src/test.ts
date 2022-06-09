@@ -258,7 +258,7 @@ test('cmpl', async (t) => {
         processors: [
           {
             transform: (content, file) => {
-              assert.equal(file, '');
+              assert.equal(file, 'test.json');
               assert.equal(content.toString(), 'rofl');
               return Buffer.from('leeeeel');
             },
