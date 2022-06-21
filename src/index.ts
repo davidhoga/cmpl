@@ -7,7 +7,9 @@ export interface Path {
 }
 export interface Fs {
   readdir: (dir: string) => Promise<string[]>;
-  stat: (dirOrFile: string) => Promise<{ isDirectory: () => boolean }>;
+  stat: (
+    dirOrFile: string,
+  ) => Promise<{ isDirectory: () => boolean; mtimeMs: number }>;
   readFile: (path: string) => Promise<Buffer>;
   mkdir: (
     path: string,
@@ -202,6 +204,7 @@ export interface WatchFs extends Fs {
 export interface WtchOpts extends Omit<CmplOptions, 'fs'> {
   signal?: AbortSignal;
   fs?: WatchFs | Promise<WatchFs>;
+  poll?: boolean | number;
   onError?: (err: unknown) => void;
 }
 
@@ -209,6 +212,7 @@ export async function* wtch({
   signal,
   entry,
   processors,
+  poll = pllOptFromEnv(),
   onError = process.env.CI
     ? (err) => {
         throw err;
@@ -251,7 +255,15 @@ export async function* wtch({
 
   const recursive = processors.some(({ recursive }) => recursive !== false);
 
-  for await (const event of watch(entry, {
+  const wtchOrPll = poll
+    ? createPll({
+        fs,
+        path,
+        interval: typeof poll === 'number' ? poll : undefined,
+      })
+    : watch;
+
+  for await (const event of wtchOrPll(entry, {
     recursive: isDir ? recursive : false,
     signal,
   })) {
@@ -311,4 +323,82 @@ export async function* wtch({
       onError(err);
     }
   }
+}
+
+function createPll({
+  path,
+  fs,
+  interval = 300,
+}: Required<Pick<CmplOptions, 'path' | 'fs'>> & { interval?: number }) {
+  return async function* pll(
+    entry: string,
+    opts: { recursive: boolean; signal?: AbortSignal },
+  ): AsyncIterable<WatchEvent> {
+    const { join, relative } = await path;
+    const { readdir, stat } = await fs;
+    const readDir = async (
+      dir: string,
+      state: Record<string, number> = {},
+    ): Promise<Record<string, number>> => {
+      await Promise.all(
+        (
+          await readdir(dir)
+        ).map(async (entryName) => {
+          const dirEntry = join(dir, entryName);
+          const s = await stat(dirEntry);
+          if (s.isDirectory() && opts.recursive) {
+            await readDir(dirEntry, state);
+          } else {
+            state[relative(entry, dirEntry)] = s.mtimeMs;
+          }
+        }),
+      );
+
+      return state;
+    };
+
+    let state = await readDir(entry);
+
+    while (!opts.signal?.aborted) {
+      await new Promise((res) => setTimeout(res, interval));
+      if (opts.signal?.aborted) {
+        break;
+      }
+      const nextState = await readDir(entry);
+      if (opts.signal?.aborted) {
+        break;
+      }
+
+      const oldEntries = Object.entries(state);
+      for (let i = 0, l = oldEntries.length; i < l; i++) {
+        const [filename, mtime] = oldEntries[i];
+        if (!nextState[filename]) {
+          yield { eventType: 'rename', filename };
+        } else if (nextState[filename] !== mtime) {
+          yield { eventType: 'change', filename };
+        }
+      }
+
+      const newEntires = Object.entries(state);
+      for (let i = 0, l = newEntires.length; i < l; i++) {
+        const [filename] = newEntires[i];
+        if (!state[filename]) {
+          yield { eventType: 'rename', filename };
+        }
+      }
+
+      state = nextState;
+    }
+  };
+}
+
+function pllOptFromEnv() {
+  if (!process.env.CMPL_USE_POLLING) {
+    return false;
+  }
+  const n = parseInt(process.env.CMPL_USE_POLLING);
+  if (!isNaN(n)) {
+    return n;
+  }
+  return true;
 }
