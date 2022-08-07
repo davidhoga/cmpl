@@ -303,6 +303,56 @@ test('cmpl', async (t) => {
     fs.done();
   });
 
+  await t.test('it transforms into multiple files', async () => {
+    const fs = createFs(
+      [
+        { method: 'stat', path: 'test.json', isDir: false },
+        {
+          method: 'readFile',
+          path: 'test.json',
+          contents: 'rofl',
+        },
+        { method: 'mkdir', path: 'dist' },
+        { method: 'mkdir', path: 'dist/deep' },
+        {
+          method: 'writeFile',
+          path: 'dist/one.json',
+          contents: '1',
+        },
+        {
+          method: 'writeFile',
+          path: 'dist/deep/two.json',
+          contents: '2',
+        },
+      ],
+      __dirname,
+    );
+
+    assert.deepEqual(
+      await cmpl({
+        entry: join(__dirname, 'test.json'),
+        processors: [
+          {
+            transform: (content, file) => {
+              assert.equal(file, 'test.json');
+              assert.equal(content.toString(), 'rofl');
+              return [
+                { content: Buffer.from('1'), name: 'one.json' },
+                { content: Buffer.from('2'), name: 'deep/two.json' },
+              ];
+            },
+            outDir: join(__dirname, 'dist'),
+          },
+        ],
+        fs,
+      }),
+      {
+        'test.json': ['one.json', 'deep/two.json'],
+      },
+    );
+    fs.done();
+  });
+
   await t.test('it applies content hashes', async () => {
     const fs = createFs(
       [

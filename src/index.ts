@@ -22,21 +22,37 @@ export interface Crypto {
     update: (content: Buffer) => { digest: (encoding: 'hex') => string };
   };
 }
+export type TransformResult =
+  | Buffer
+  | {
+      content: Buffer;
+      name: string;
+    }
+  | {
+      content: Buffer;
+      name: string;
+    }[]
+  | null;
 export type TransformFn = (
   content: Buffer,
   file: string,
-) => Buffer | null | Promise<Buffer | null>;
+) => TransformResult | Promise<TransformResult>;
 export type FileNamerFn = (
   originalName: string,
   contents: Buffer,
 ) => string | Promise<string>;
-export interface Prcssr {
+export interface BasePrcssr {
   outDir: string;
   recursive?: boolean;
-  rename?: FileNamerFn;
   include?: (name: string, isDir: boolean) => boolean;
-  transform?: TransformFn;
 }
+export interface RenamePrcssr extends BasePrcssr {
+  rename?: FileNamerFn;
+}
+export interface TransformPrcssr extends BasePrcssr {
+  transform: TransformFn;
+}
+export type Prcssr = RenamePrcssr | TransformPrcssr;
 export interface CmplOptions {
   entry: string;
   processors: (Prcssr | Promise<Prcssr>)[];
@@ -69,7 +85,7 @@ export async function prcss(
     path = import('node:path'),
   }: Pick<CmplOptions, 'entry' | 'fs' | 'path'>,
   processors: (Prcssr | null)[],
-): Promise<(null | Record<string, string>)[]> {
+): Promise<(null | Record<string, string | string[]>)[]> {
   const { relative, dirname, join } = await path;
   const { readFile, mkdir, writeFile } = await fs;
   const contentsP = readFile(file);
@@ -80,22 +96,52 @@ export async function prcss(
       if (!p) {
         return p;
       }
-      const {
-        outDir,
-        transform = (b) => b,
-        rename = async (p) => (await path).basename(p),
-      } = p;
-      const contents = await transform(await contentsP, inName);
+
+      const copyName = (await path).basename(inName);
+      if (!isRenamePrcssr(p) && typeof (p as any).rename === 'function') {
+        console.warn(
+          'WARING: unexpected rename method on transform processor, will be ignored!',
+          'Return new name from transform method via { content: Buffer, name: string }',
+        );
+      }
+
+      const contents = isRenamePrcssr(p)
+        ? {
+            content: await contentsP,
+            name: (await p.rename?.(inName, await contentsP)) || copyName,
+          }
+        : await p.transform(await contentsP, inName);
+
       if (contents === null) {
         return null;
       }
-      const name = await rename(inName, contents);
-      const targerDir = join(outDir, relative(entry, dirname(file)));
-      const targetFile = join(targerDir, name);
 
-      await mkdir(targerDir, { recursive: true });
-      await writeFile(targetFile, contents);
-      return { [inName]: relative(outDir, targetFile) };
+      const targerDir = join(p.outDir, relative(entry, dirname(file)));
+
+      const writes = Array.isArray(contents)
+        ? contents
+        : contents instanceof Buffer
+        ? [{ content: contents, name: copyName }]
+        : [contents];
+
+      if (writes.length === 0) {
+        return null;
+      }
+
+      const outFiles = await Promise.all(
+        writes.map(async ({ content, name }) => {
+          const targetFile = join(targerDir, name);
+
+          await mkdir(dirname(targetFile), { recursive: true });
+          await writeFile(targetFile, content);
+
+          return relative(p.outDir, targetFile);
+        }),
+      );
+
+      return {
+        [inName]: Array.isArray(contents) ? outFiles : outFiles[0],
+      };
     }),
   );
 }
@@ -408,4 +454,8 @@ function pllOptFromEnv() {
     return n;
   }
   return true;
+}
+
+function isRenamePrcssr(prcssr: Prcssr): prcssr is RenamePrcssr {
+  return typeof (prcssr as any).transform !== 'function';
 }
