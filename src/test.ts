@@ -46,9 +46,9 @@ test('cmpl', async (t) => {
       await cmpl({
         entry: join(__dirname, 'test.json'),
         processors: [
-          {
+          Promise.resolve({
             outDir: join(__dirname, 'dist'),
-          },
+          }),
         ],
         fs,
       }),

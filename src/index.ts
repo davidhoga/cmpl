@@ -39,7 +39,7 @@ export interface Prcssr {
 }
 export interface CmplOptions {
   entry: string;
-  processors: Prcssr[];
+  processors: (Prcssr | Promise<Prcssr>)[];
   path?: Path | Promise<Path>;
   fs?: Fs | Promise<Fs>;
 }
@@ -184,7 +184,7 @@ export async function cmpl({
     );
   };
 
-  await handle(entry, '', processors);
+  await handle(entry, '', await Promise.all(processors));
 
   if (processors.length === 1) {
     return manifest[0];
@@ -256,7 +256,9 @@ export async function* wtch({
         entry: baseDir,
       };
 
-  const recursive = processors.some(({ recursive }) => recursive !== false);
+  const recursive = (await Promise.all(processors)).some(
+    ({ recursive }) => recursive !== false,
+  );
 
   const wtchOrPll = poll
     ? createPll({
@@ -292,17 +294,19 @@ export async function* wtch({
           }
           case 'change': {
             let relevantChange = false;
-            const changeProcessors = processors.map((p) => {
-              const incl =
-                p && (!p.include || p.include(event.filename, false))
-                  ? p
-                  : null;
+            const changeProcessors = (await Promise.all(processors)).map(
+              (p) => {
+                const incl =
+                  p && (!p.include || p.include(event.filename, false))
+                    ? p
+                    : null;
 
-              if (incl) {
-                relevantChange = true;
-              }
-              return incl;
-            });
+                if (incl) {
+                  relevantChange = true;
+                }
+                return incl;
+              },
+            );
 
             if (relevantChange) {
               (
