@@ -25,7 +25,7 @@ export interface Crypto {
 export type TransformFn = (
   content: Buffer,
   file: string,
-) => Buffer | Promise<Buffer>;
+) => Buffer | null | Promise<Buffer | null>;
 export type FileNamerFn = (
   originalName: string,
   contents: Buffer,
@@ -86,6 +86,9 @@ export async function prcss(
         rename = async (p) => (await path).basename(p),
       } = p;
       const contents = await transform(await contentsP, inName);
+      if (contents === null) {
+        return null;
+      }
       const name = await rename(inName, contents);
       const targerDir = join(outDir, relative(entry, dirname(file)));
       const targetFile = join(targerDir, name);

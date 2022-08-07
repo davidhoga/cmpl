@@ -274,6 +274,35 @@ test('cmpl', async (t) => {
     fs.done();
   });
 
+  await t.test('excludes null transforms', async () => {
+    const fs = createFs(
+      [
+        { method: 'stat', path: 'test.json', isDir: false },
+        {
+          method: 'readFile',
+          path: 'test.json',
+          contents: 'rofl',
+        },
+      ],
+      __dirname,
+    );
+
+    assert.deepEqual(
+      await cmpl({
+        entry: join(__dirname, 'test.json'),
+        processors: [
+          {
+            transform: () => null,
+            outDir: join(__dirname, 'dist'),
+          },
+        ],
+        fs,
+      }),
+      {},
+    );
+    fs.done();
+  });
+
   await t.test('it applies content hashes', async () => {
     const fs = createFs(
       [
