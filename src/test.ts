@@ -648,6 +648,7 @@ function defer<T>(): Deferred<T> {
     resolve = res;
     reject = rej;
   });
+  // @ts-ignore
   return { promise, resolve, reject };
 }
 
@@ -710,6 +711,7 @@ function createFs(
       }
       return {
         isDirectory: () => isDir,
+        mtimeMs: 0,
       };
     },
     mkdir: async (p) => {
